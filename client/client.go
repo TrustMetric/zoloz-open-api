@@ -6,11 +6,14 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/TrustMetric/zoloz-open-api/utilities/encryption"
 	"github.com/TrustMetric/zoloz-open-api/utilities/net_utils"
 )
+
+const DefaultAESLength = 32
 
 type OpenAPIClient struct {
 	HostURL            string
@@ -27,6 +30,7 @@ func NewOpenAPIClient(hostURL string, encrypted bool) *OpenAPIClient {
 		// Signed:    true,
 		HostURL:   hostURL,
 		Encrypted: encrypted,
+		AESLength: DefaultAESLength,
 	}
 }
 
@@ -54,12 +58,14 @@ func NewOpenAPIClient(hostURL string, encrypted bool) *OpenAPIClient {
 // 	return
 // }
 
-func (c *OpenAPIClient) CallOpenAPI(apiName string, request []byte) (result string, err error) {
+func (c *OpenAPIClient) CallOpenAPI(apiName, request string) (result string, err error) {
 	requestTime := time.Now()
 	timeFormat := "2006-01-02T15:04:05-0700"
 	formattedTime := requestTime.Format(timeFormat)
+
 	unsignedContent := "POST " + apiName + "\n" + c.ClientID + "." + formattedTime + "." + string(request)
-	fmt.Println("content to be signed:" + unsignedContent)
+
+	log.Println("content to be signed:" + unsignedContent)
 
 	privateKey, err := encryption.DecodeBase64PrivateKey(c.MerchantPrivateKey)
 	if err != nil {
@@ -69,7 +75,10 @@ func (c *OpenAPIClient) CallOpenAPI(apiName string, request []byte) (result stri
 	signature := encryption.CreateSignature(unsignedContent, privateKey)
 	fmt.Println(signature)
 
-	r := c.post(apiName, formattedTime, signature, request)
+	r, err := c.post(apiName, formattedTime, signature, request)
+	if err != nil {
+		return "", err
+	}
 	result = string(r)
 
 	log.Print(result)
@@ -77,19 +86,52 @@ func (c *OpenAPIClient) CallOpenAPI(apiName string, request []byte) (result stri
 	return result, nil
 }
 
-func (c *OpenAPIClient) post(apiName, requestTime, signature string, request []byte) []byte {
-	client := &http.Client{}
+func (c *OpenAPIClient) post(apiName, requestTime, signature, request string) (response []byte, err error) {
 
-	req, _ := http.NewRequest(http.MethodPost, c.HostURL+apiName, bytes.NewBuffer(request))
-	req.Header.Set(net_utils.HeaderContentType, net_utils.ContentTypeJSON)
+	var (
+		aesKey          []byte
+		encryptedAESKey string
+	)
+
+	if c.Encrypted {
+		aesKey, err = encryption.GenerateAESKey(c.AESLength)
+		if err != nil {
+			return nil, err
+		}
+
+		request, err = encryption.AESEncrypt(aesKey, request)
+		if err != nil {
+			return nil, err
+		}
+
+		encryptedAESKey, err = encryption.RSAEncrypt(c.OpenAPIPublicKey, string(aesKey))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	client := &http.Client{}
+	req, _ := http.NewRequest(http.MethodPost, c.HostURL+apiName, bytes.NewBuffer([]byte(request)))
+
+	if c.Encrypted {
+		req.Header.Set(net_utils.HeaderContentType, net_utils.ContentTypePlainText)
+		req.Header.Set(net_utils.HeaderEncrypt, "algorithm=RSA_AES, symmetricKey="+url.QueryEscape(encryptedAESKey))
+	} else {
+		req.Header.Set(net_utils.HeaderContentType, net_utils.ContentTypeJSON)
+	}
+
 	req.Header.Set(net_utils.HeaderClientId, c.ClientID)
 	req.Header.Set(net_utils.HeaderRequestTime, requestTime)
 	req.Header.Set(net_utils.HeaderSignature, "algorithm=RSA256, signature="+signature)
+
+	if c.IsLoadTest {
+		req.Header.Set(net_utils.HeaderLoadTestMode, "true")
+	}
 	res, _ := client.Do(req)
 	respBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		panic(err)
 	}
 
-	return respBody
+	return respBody, nil
 }
