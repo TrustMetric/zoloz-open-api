@@ -2,7 +2,6 @@ package client
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -60,22 +59,10 @@ func NewOpenAPIClient(hostURL string, encrypted bool) *OpenAPIClient {
 
 func (c *OpenAPIClient) CallOpenAPI(apiName, request string) (result string, err error) {
 	requestTime := time.Now()
-	timeFormat := "2006-01-02T15:04:05-0700"
+	timeFormat := "2006-01-02T15:04:05Z0700"
 	formattedTime := requestTime.Format(timeFormat)
 
-	unsignedContent := "POST " + apiName + "\n" + c.ClientID + "." + formattedTime + "." + string(request)
-
-	log.Println("content to be signed:" + unsignedContent)
-
-	privateKey, err := encryption.DecodeBase64PrivateKey(c.MerchantPrivateKey)
-	if err != nil {
-		panic(err)
-	}
-
-	signature := encryption.CreateSignature(unsignedContent, privateKey)
-	fmt.Println(signature)
-
-	r, err := c.post(apiName, formattedTime, signature, request)
+	r, err := c.post(apiName, formattedTime, request)
 	if err != nil {
 		return "", err
 	}
@@ -86,7 +73,7 @@ func (c *OpenAPIClient) CallOpenAPI(apiName, request string) (result string, err
 	return result, nil
 }
 
-func (c *OpenAPIClient) post(apiName, requestTime, signature, request string) (response []byte, err error) {
+func (c *OpenAPIClient) post(apiName, requestTime, request string) (response []byte, err error) {
 
 	var (
 		aesKey          []byte
@@ -99,16 +86,35 @@ func (c *OpenAPIClient) post(apiName, requestTime, signature, request string) (r
 			return nil, err
 		}
 
+		log.Println("AES Key: " + string(aesKey))
+
 		request, err = encryption.AESEncrypt(aesKey, request)
 		if err != nil {
 			return nil, err
 		}
 
-		encryptedAESKey, err = encryption.RSAEncrypt(c.OpenAPIPublicKey, string(aesKey))
+		log.Println("Encrypted Request: " + request + "\n")
+
+		encryptedAESKey, err = encryption.RSAEncrypt(c.OpenAPIPublicKey, aesKey)
 		if err != nil {
+			log.Println(err.Error())
 			return nil, err
 		}
+
+		log.Println("Encrypted AESKey: ", encryptedAESKey+"\n")
 	}
+
+	privateKey, err := encryption.DecodeBase64PrivateKey(c.MerchantPrivateKey)
+	log.Println("Private key: " + privateKey.D.String() + "\n")
+	if err != nil {
+		panic(err)
+	}
+
+	unsignedContent := "POST " + apiName + "\n" + c.ClientID + "." + requestTime + "." + request
+	log.Println("content to be signed:" + unsignedContent + "\n")
+
+	signature := encryption.CreateSignature(unsignedContent, privateKey)
+	log.Println("Signature is: " + signature + "\n")
 
 	client := &http.Client{}
 	req, _ := http.NewRequest(http.MethodPost, c.HostURL+apiName, bytes.NewBuffer([]byte(request)))
@@ -128,10 +134,23 @@ func (c *OpenAPIClient) post(apiName, requestTime, signature, request string) (r
 		req.Header.Set(net_utils.HeaderLoadTestMode, "true")
 	}
 	res, _ := client.Do(req)
+
+	log.Println("Response from Zoloz: ", res, "\n")
+
 	respBody, err := io.ReadAll(res.Body)
 	if err != nil {
 		panic(err)
 	}
+	log.Println("Response body: ", respBody, "\n")
+
+	if c.Encrypted {
+		decryptedResponseBody, err := encryption.RSADecrypt(c.MerchantPrivateKey, string(respBody))
+		if err != nil {
+			return nil, err
+		}
+		return []byte(decryptedResponseBody), nil
+	}
 
 	return respBody, nil
+
 }
