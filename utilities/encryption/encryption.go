@@ -61,7 +61,7 @@ func PKCS5Padding(src []byte, blockSize int) []byte {
 
 func RSAEncrypt(publicKeyPEM string, content []byte) (string, error) {
 
-	wrappedPEM := NormalizePEM(publicKeyPEM)
+	wrappedPEM := NormalizePEM(publicKeyPEM, "PUBLIC")
 
 	block, _ := pem.Decode([]byte(wrappedPEM))
 
@@ -102,52 +102,113 @@ func RSAEncrypt(publicKeyPEM string, content []byte) (string, error) {
 }
 
 func RSADecrypt(privateKeyPEM, content string) (string, error) {
-	decoded, err := base64.StdEncoding.DecodeString(content)
+	// decoded, err := base64.StdEncoding.DecodeString(content)
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return "", err
+	// }
+	// log.Println("Content decoded\n")
+
+	// wrappedPEM := NormalizePEM(privateKeyPEM, "PRIVATE")
+	// log.Println("PEM Normalized\n")
+
+	// block, _ := pem.Decode([]byte(wrappedPEM))
+	// if block == nil || block.Type != "PRIVATE KEY" {
+	// 	log.Println("Block Type: ", block.Type)
+	// 	return "", errors.New("failed to decode PEM block containing private key")
+	// }
+	// log.Println("Acquired Block")
+
+	// // Parse the private key
+	// priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	// if err != nil {
+	// 	return "", err
+	// }
+
+	// log.Println("PKCS8PrivateKey: ", priv, "\n")
+
+	// // Type assert to RSA private key
+	// rsaPrivateKey, ok := priv.(*rsa.PrivateKey)
+	// if !ok {
+	// 	return "", errors.New("not an RSA private key")
+	// }
+	// log.Println("RSA Private Key: ", rsaPrivateKey, "\n")
+
+	// decryptedResult, err := rsa.DecryptPKCS1v15(rand.Reader, rsaPrivateKey, decoded)
+	// if err != nil {
+	// 	log.Println(err)
+	// 	return "", err
+	// }
+	// log.Println("Content decrypted: ", decryptedResult, "\n")
+
+	// return string(decryptedResult), nil
+	// Decode Base64-encoded ciphertext
+
+	decodedCiphertext, err := base64.StdEncoding.DecodeString(content)
 	if err != nil {
-		log.Println(err)
+		log.Println("Failed to decode from base64: ", err)
 		return "", err
 	}
-	log.Println("Content decoded\n")
 
-	wrappedPEM := NormalizePEM(privateKeyPEM)
-	log.Println("PEM Normalized\n")
+	log.Println("Decoded cipher text: ", string(decodedCiphertext))
 
-	block, _ := pem.Decode([]byte(wrappedPEM))
+	// Normalize and parse the private key
+	privateKeyPEM = NormalizePEM(privateKeyPEM, "PRIVATE")
+
+	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil || block.Type != "PRIVATE KEY" {
-		log.Println("Block Type: ", block.Type)
+		log.Println("Failed to decode PEM: ")
 		return "", errors.New("failed to decode PEM block containing private key")
 	}
-	log.Println("Acquired Block")
+	log.Println("Decoded PEM: ", block)
 
-	// Parse the private key
+	// Parse private key
 	priv, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return "", err
+		priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			log.Println("Failed to parse private key: ", err)
+			return "", err
+		}
 	}
 
-	log.Println("PKCS8PrivateKey: ", priv, "\n")
+	log.Println("Parsed private key: ", priv)
 
 	// Type assert to RSA private key
 	rsaPrivateKey, ok := priv.(*rsa.PrivateKey)
 	if !ok {
+		log.Println("Failed to assert key: ", err)
 		return "", errors.New("not an RSA private key")
 	}
-	log.Println("RSA Private Key: ", rsaPrivateKey, "\n")
 
-	decryptedResult, err := rsa.DecryptPKCS1v15(rand.Reader, rsaPrivateKey, []byte(decoded))
+	log.Println("Parsed private key: ", priv)
+
+	// Decrypt the content
+	decryptedData, err := rsa.DecryptPKCS1v15(rand.Reader, rsaPrivateKey, decodedCiphertext)
 	if err != nil {
+		log.Println("Failed to decrypt key: ", err)
 		return "", err
 	}
-	log.Println("Content decrypted: ", decryptedResult, "\n")
 
-	return string(decryptedResult), nil
+	return string(decryptedData), nil
 }
 
-func NormalizePEM(publicKeyPEM string) string {
-	publicKeyPEM = strings.ReplaceAll(publicKeyPEM, "-----BEGIN PUBLIC KEY-----", "")
-	publicKeyPEM = strings.ReplaceAll(publicKeyPEM, "-----END PUBLIC KEY-----", "")
-	publicKeyPEM = strings.ReplaceAll(publicKeyPEM, "\n", "")
-	return "-----BEGIN PUBLIC KEY-----\n" + publicKeyPEM + "\n-----END PUBLIC KEY-----"
+func NormalizePEM(keyPEM, keyType string) string {
+
+	keyPEM = strings.TrimSpace(keyPEM)
+	keyPEM = strings.ReplaceAll(keyPEM, "-----BEGIN PUBLIC KEY-----", "")
+	keyPEM = strings.ReplaceAll(keyPEM, "-----BEGIN PRIVATE KEY-----", "")
+	keyPEM = strings.ReplaceAll(keyPEM, "-----BEGIN RSA PRIVATE KEY-----", "")
+	keyPEM = strings.ReplaceAll(keyPEM, "-----END PUBLIC KEY-----", "")
+	keyPEM = strings.ReplaceAll(keyPEM, "-----END PRIVATE KEY-----", "")
+	keyPEM = strings.ReplaceAll(keyPEM, "-----END RSA PRIVATE KEY-----", "")
+	keyPEM = strings.TrimSpace(keyPEM)
+
+	if keyType == "PUBLIC" {
+		return "-----BEGIN PUBLIC KEY-----\n" + keyPEM + "\n-----END PUBLIC KEY-----"
+	}
+
+	return "-----BEGIN PRIVATE KEY-----\n" + keyPEM + "\n-----END PRIVATE KEY-----"
 }
 
 func DecodeBase64PrivateKey(key string) (*rsa.PrivateKey, error) {
