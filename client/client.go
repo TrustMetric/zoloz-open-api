@@ -152,7 +152,11 @@ func (c *OpenAPIClient) post(apiName, requestTime, request string) (response []b
 	log.Println("Response body: ", respBody, "\n")
 
 	if c.Encrypted {
-		encryptHeader := req.Header.Get("Encrypt")
+		encryptHeader := res.Header.Get("Encrypt")
+		log.Println("The headers: ")
+		for i, v := range res.Header {
+			log.Println("Key [", i, "]", "Value [", v, "]")
+		}
 		if encryptHeader == "" {
 			return nil, errors.New("the Encrypt header is not found")
 		}
@@ -177,7 +181,9 @@ func (c *OpenAPIClient) post(apiName, requestTime, request string) (response []b
 			log.Println("Failed to decrypt symmetric key!")
 			return nil, err
 		}
-		return []byte(decryptedSymmetricKey), nil
+
+		decryptedResponse, _ := encryption.AESDecrypt(decryptedSymmetricKey, string(respBody))
+		return []byte(decryptedResponse), nil
 	}
 
 	return respBody, nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -51,6 +52,39 @@ func AESEncrypt(key []byte, content string) (string, error) {
 	}
 
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+func AESDecrypt(key []byte, content string) (string, error) {
+	// Decode Base64 content
+	encryptedData, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		return "", err
+	}
+
+	// Create AES cipher block
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	// Check that the ciphertext length is a multiple of the block size
+	if len(encryptedData)%aes.BlockSize != 0 {
+		return "", fmt.Errorf("ciphertext is not a multiple of the block size")
+	}
+
+	// Decrypt using ECB mode
+	decrypted := make([]byte, len(encryptedData))
+	decryptECB(block, encryptedData, decrypted)
+
+	// Convert to string and return
+	return string(decrypted), nil
+}
+
+func decryptECB(block cipher.Block, ciphertext, decrypted []byte) {
+	blockSize := block.BlockSize()
+	for i := 0; i < len(ciphertext); i += blockSize {
+		block.Decrypt(decrypted[i:i+blockSize], ciphertext[i:i+blockSize])
+	}
 }
 
 func PKCS5Padding(src []byte, blockSize int) []byte {
@@ -101,7 +135,7 @@ func RSAEncrypt(publicKeyPEM string, content []byte) (string, error) {
 	return encoded, nil
 }
 
-func RSADecrypt(privateKeyPEM, content string) (string, error) {
+func RSADecrypt(privateKeyPEM, content string) ([]byte, error) {
 	// decoded, err := base64.StdEncoding.DecodeString(content)
 	// if err != nil {
 	// 	log.Println(err)
@@ -147,9 +181,10 @@ func RSADecrypt(privateKeyPEM, content string) (string, error) {
 	decodedCiphertext, err := base64.StdEncoding.DecodeString(content)
 	if err != nil {
 		log.Println("Failed to decode from base64: ", err)
-		return "", err
+		return nil, err
 	}
 
+	log.Println("Decoded cipher text length: ", len(decodedCiphertext))
 	log.Println("Decoded cipher text: ", string(decodedCiphertext))
 
 	// Normalize and parse the private key
@@ -158,7 +193,7 @@ func RSADecrypt(privateKeyPEM, content string) (string, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil || block.Type != "PRIVATE KEY" {
 		log.Println("Failed to decode PEM: ")
-		return "", errors.New("failed to decode PEM block containing private key")
+		return nil, errors.New("failed to decode PEM block containing private key")
 	}
 	log.Println("Decoded PEM: ", block)
 
@@ -168,7 +203,7 @@ func RSADecrypt(privateKeyPEM, content string) (string, error) {
 		priv, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 		if err != nil {
 			log.Println("Failed to parse private key: ", err)
-			return "", err
+			return nil, err
 		}
 	}
 
@@ -178,7 +213,7 @@ func RSADecrypt(privateKeyPEM, content string) (string, error) {
 	rsaPrivateKey, ok := priv.(*rsa.PrivateKey)
 	if !ok {
 		log.Println("Failed to assert key: ", err)
-		return "", errors.New("not an RSA private key")
+		return nil, errors.New("not an RSA private key")
 	}
 
 	log.Println("Parsed private key: ", priv)
@@ -187,10 +222,10 @@ func RSADecrypt(privateKeyPEM, content string) (string, error) {
 	decryptedData, err := rsa.DecryptPKCS1v15(rand.Reader, rsaPrivateKey, decodedCiphertext)
 	if err != nil {
 		log.Println("Failed to decrypt key: ", err)
-		return "", err
+		return nil, err
 	}
 
-	return string(decryptedData), nil
+	return decryptedData, nil
 }
 
 func NormalizePEM(keyPEM, keyType string) string {
