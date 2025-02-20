@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -151,6 +152,30 @@ func (c *OpenAPIClient) post(apiName, requestTime, request string) (response []b
 	}
 	log.Println("Response body: ", respBody, "\n")
 
+	signatureHeader := res.Header.Get("Signature")
+	log.Println("The Response Signature Header is: ", signatureHeader, "\n")
+
+	responseSignature, err := ExtractHeaderValue(signatureHeader, "signature", ",")
+	if err != nil {
+		log.Println("Error extracting signature: ", err)
+		return nil, err
+	}
+	log.Println("The Response Signature is: ", responseSignature, "\n")
+
+	responseTime := res.Header.Get("Response-Time")
+	responseTime = strings.TrimSpace(responseTime)
+	log.Println("The Response-Time Header is: ", responseTime)
+
+	unverifiedContent := "POST " + apiName + "\n" + c.ClientID + "." + responseTime + "." + string(respBody)
+	isVerified, err := encryption.VerifySignature(c.OpenAPIPublicKey, unverifiedContent, responseSignature)
+	if err != nil {
+		log.Println("Verification failed: ", err, "\n")
+		return nil, err
+	}
+	if !isVerified {
+		return nil, errors.New("the response is tampered")
+	}
+
 	if c.Encrypted {
 		encryptHeader := res.Header.Get("Encrypt")
 		log.Println("The headers: ")
@@ -188,6 +213,42 @@ func (c *OpenAPIClient) post(apiName, requestTime, request string) (response []b
 
 	return respBody, nil
 
+}
+
+func ExtractHeaderValue(headerValue, key, separator string) (string, error) {
+	// Split the header by separator to get key-value pairs
+	parts := strings.Split(headerValue, separator)
+	log.Println("The splitted header: ", parts, "\n")
+
+	for _, part := range parts {
+		log.Println("Dissecting ", part, "\n")
+		// Split each key-value pair
+		keyValue := strings.SplitN(part, "=", 2)
+		log.Println("Dissected as ", keyValue, "with the length of", len(keyValue), "\n")
+
+		if len(keyValue) == 2 {
+			k := strings.TrimSpace(keyValue[0])
+			v := strings.TrimSpace(keyValue[1])
+			log.Printf("Key is \"%s\" and value is \"%s\"", k, v)
+
+			if k == key {
+				log.Printf("The key \"%s\" is found!\n\n", key)
+				// Check if it's the signature field
+				if key == "signature" {
+					log.Printf("Decoding signature")
+					// The signature might be URL-encoded, so decode it
+					decodedValue, err := url.QueryUnescape(v)
+					if err != nil {
+						return "", fmt.Errorf("error decoding signature: %v", err)
+					}
+
+					return decodedValue, nil
+				}
+				return v, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("signature not found")
 }
 
 // func (c *OpenAPIClient) EncryptDecrypt() {

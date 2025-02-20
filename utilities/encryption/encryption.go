@@ -289,3 +289,45 @@ func CreateSignature(unsignedContent string, privateKey *rsa.PrivateKey) string 
 	signature = url.QueryEscape(signature)
 	return signature
 }
+
+func VerifySignature(publicKeyStr, unsignedContent, signatureEncoded string) (bool, error) {
+
+	wrappedPEM := NormalizePEM(publicKeyStr, "PUBLIC")
+
+	block, _ := pem.Decode([]byte(wrappedPEM))
+
+	if block == nil || block.Type != "PUBLIC KEY" {
+		return false, errors.New("failed to decode PEM block containing public key")
+	}
+
+	// Parse the public key
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return false, err
+	}
+
+	log.Println("PKIXPublicKey: ", pub, "\n")
+
+	// Type assert to RSA public key
+	publicKey, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return false, err
+	}
+
+	// Decode the Base64 signature
+	signature, err := base64.StdEncoding.DecodeString(signatureEncoded)
+	if err != nil {
+		return false, fmt.Errorf("failed to decode base64 signature: %v", err)
+	}
+
+	// Hash the original content (SHA-256)
+	hashed := sha256.Sum256([]byte(unsignedContent))
+
+	// Verify the signature using RSA PKCS#1 v1.5
+	err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed[:], signature)
+	if err != nil {
+		return false, errors.New("signature verification failed")
+	}
+
+	return true, nil
+}
