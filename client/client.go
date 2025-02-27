@@ -29,41 +29,14 @@ type OpenAPIClient struct {
 
 func NewOpenAPIClient(hostURL string, encrypted bool) *OpenAPIClient {
 	return &OpenAPIClient{
-		// Signed:    true,
 		HostURL:   hostURL,
 		Encrypted: encrypted,
 		AESLength: DefaultAESLength,
 	}
 }
 
-// func (c *OpenAPIClient) CallOpenAPI(apiName, request string) (result string, err error) {
-/*
-	1. Generate random AES key
-	2. Encrypt the request using the randomly generated key
-	3. Encrypt the AES key using RSA method with openAPIPublicKey
-	4. Create a signature, the signature is "POST " + API URL + "\n" + Client ID + "." + formatted time + "." + encrypted request
-		a. Generate PKCS8EncodedKeySpec from private key that got decoded from base64
-		b. Create signature instance SHA256withRSA
-		c. Sign the private key
-*/
-
-// var (
-// 	encryptKey string
-// 	key        []byte
-// )
-
-// if c.Encrypted {
-// 	key, err = encryption.GenerateAESKey(c.AESLength)
-// 	request = encryption.AESEncrypt()
-// }
-
-// 	return
-// }
-
 func (c *OpenAPIClient) CallOpenAPI(apiName, request string) (result string, err error) {
 	requestTime := time.Now()
-	// timeFormat := "2006-01-02T15:04:05Z0700"
-	// formattedTime := requestTime.Format(timeFormat)
 	formattedTime := requestTime.Format(time.RFC3339)
 	formattedTime = formattedTime[:22] + formattedTime[23:]
 
